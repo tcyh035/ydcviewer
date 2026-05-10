@@ -9,7 +9,8 @@ DICOM 3D medical image viewer. React frontend (Material Design) + C# backend wit
 - Annotations/measurements via **HTTP REST** (persistent CRUD)
 - 3D render stream via **WebSocket** (transient, real-time)
 - Single OpenGL context on one render thread, serves all users
-- Render thread receives latest camera params from a queue (drop stale frames)
+- Frontend sends raw input events (mouse dx/dy/buttons/scroll); backend owns camera state
+- Render thread queue drops stale input events, always processes latest
 
 ## Backend (.NET)
 - Solution: `YdcViewer.sln` with 5 projects
@@ -33,7 +34,11 @@ DICOM 3D medical image viewer. React frontend (Material Design) + C# backend wit
 
 ## Key Files
 - `Backend/YdcViewer.Api/Program.cs` - API startup & DI config
+- `Backend/YdcViewer.Dicom/DicomParser.cs` - fo-dicom DICOM parsing
+- `Backend/YdcViewer.Dicom/VolumeData.cs` - 3D volume data assembly
 - `Backend/YdcViewer.Renderer/RenderEngine.cs` - OpenGL lifecycle
 - `Backend/YdcViewer.Renderer/Shaders/volume.frag` - Ray Casting shader
 - `Frontend/src/hooks/useRenderSocket.ts` - WebSocket render client
 - `Frontend/src/pages/ViewerPage.tsx` - Main viewer layout
+- `docs/architecture.md` - Detailed architecture and threading model
+- `docs/api.md` - REST API and WebSocket protocol reference
