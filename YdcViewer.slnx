@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/Backend/">
+    <Project Path="Backend/YdcViewer.Api/YdcViewer.Api.csproj" />
+    <Project Path="Backend/YdcViewer.Auth/YdcViewer.Auth.csproj" />
+    <Project Path="Backend/YdcViewer.Data/YdcViewer.Data.csproj" />
+    <Project Path="Backend/YdcViewer.Dicom/YdcViewer.Dicom.csproj" />
+    <Project Path="Backend/YdcViewer.Renderer/YdcViewer.Renderer.csproj" />
+    <Project Path="Backend/YdcViewer.Tests/YdcViewer.Tests.csproj" />
+  </Folder>
+</Solution>

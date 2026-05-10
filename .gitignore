@@ -1,0 +1,43 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+*.nupkg
+*.snupkg
+.vs/
+*.DotSettings.user
+appsettings.Development.json
+
+# Node
+node_modules/
+dist/
+.env
+.env.local
+*.local
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+TestResults/
+coverage/
+
+# SQLite databases (generated at runtime)
+*.db
+*.db-shm
+*.db-wal
+
+# Uploaded DICOM files
+uploads/
