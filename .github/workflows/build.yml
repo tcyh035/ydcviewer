@@ -10,6 +10,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
@@ -42,13 +43,13 @@ jobs:
           cp -r Frontend/dist Backend/YdcViewer.Api/wwwroot
 
       - name: Restore backend
-        run: dotnet restore
+        run: dotnet restore YdcViewer.slnx
 
       - name: Build backend
-        run: dotnet build --no-restore -c Release
+        run: dotnet build YdcViewer.slnx --no-restore -c Release
 
       - name: Run backend tests
-        run: dotnet test --no-build -c Release --verbosity normal
+        run: dotnet test YdcViewer.slnx --no-build -c Release --verbosity normal
 
       - name: Publish
         run: dotnet publish Backend/YdcViewer.Api -c Release -o publish
