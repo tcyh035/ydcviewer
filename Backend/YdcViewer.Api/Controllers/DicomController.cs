@@ -60,7 +60,6 @@ public class DicomController : ControllerBase
         double slope, double intercept,
         int windowCenter, int windowWidth)
     {
-        var bytesPerVoxel = bitsAllocated / 8;
         var voxelCount = width * height;
 
         // Convert raw bytes to double values (apply rescale)
@@ -97,7 +96,6 @@ public class DicomController : ControllerBase
         }
 
         var lower = center - wWidth / 2.0;
-        var upper = center + wWidth / 2.0;
 
         var grayscale = new byte[voxelCount];
         for (int i = 0; i < voxelCount; i++)
