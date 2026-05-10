@@ -33,6 +33,8 @@ Thumbs.db
 # Build artifacts
 TestResults/
 coverage/
+publish/
+Backend/YdcViewer.Api/wwwroot/
 
 # SQLite databases (generated at runtime)
 *.db
