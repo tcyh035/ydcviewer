@@ -38,6 +38,7 @@ jobs:
         working-directory: Frontend
 
       - name: Copy frontend dist to backend wwwroot
+        shell: bash
         run: |
           rm -rf Backend/YdcViewer.Api/wwwroot
           cp -r Frontend/dist Backend/YdcViewer.Api/wwwroot
