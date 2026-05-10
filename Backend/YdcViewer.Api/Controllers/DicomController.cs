@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Mvc;
 using YdcViewer.Dicom;
+using YdcViewer.Renderer;
 
 namespace YdcViewer.Api.Controllers;
 
@@ -8,6 +10,13 @@ namespace YdcViewer.Api.Controllers;
 public class DicomController : ControllerBase
 {
     private readonly DicomParser _parser = new();
+    private static readonly ConcurrentDictionary<string, DicomSeries> _seriesStore = new();
+    private static readonly Lazy<RenderEngine> _renderEngine = new(() =>
+    {
+        var engine = new RenderEngine();
+        engine.Initialize();
+        return engine;
+    });
 
     [HttpPost("upload")]
     public async Task<IActionResult> Upload(IFormFile file)
@@ -24,6 +33,14 @@ public class DicomController : ControllerBase
             var result = await _parser.ParseFileAsync(tempPath);
             var metadata = result.Metadata;
 
+            // Store in series
+            var seriesId = metadata.SeriesInstanceUid;
+            if (string.IsNullOrEmpty(seriesId))
+                seriesId = Guid.NewGuid().ToString();
+
+            var series = _seriesStore.GetOrAdd(seriesId, _ => new DicomSeries());
+            series.AddSlice(result);
+
             // Convert pixel data to displayable grayscale image
             var imageBytes = ConvertToGrayscalePng(
                 result.PixelData,
@@ -38,6 +55,7 @@ public class DicomController : ControllerBase
 
             return Ok(new
             {
+                seriesId,
                 metadata.PatientName,
                 metadata.Modality,
                 metadata.Width,
@@ -45,6 +63,7 @@ public class DicomController : ControllerBase
                 metadata.BitsAllocated,
                 metadata.WindowCenter,
                 metadata.WindowWidth,
+                sliceCount = series.Slices.Count,
                 imageBase64 = Convert.ToBase64String(imageBytes)
             });
         }
@@ -52,6 +71,95 @@ public class DicomController : ControllerBase
         {
             System.IO.File.Delete(tempPath);
         }
+    }
+
+    [HttpGet("series")]
+    public IActionResult ListSeries()
+    {
+        var series = _seriesStore.Select(kv => new
+        {
+            seriesId = kv.Key,
+            kv.Value.Metadata.PatientName,
+            kv.Value.Metadata.Modality,
+            sliceCount = kv.Value.Slices.Count
+        });
+        return Ok(series);
+    }
+
+    [HttpPost("render3d")]
+    public IActionResult Render3D([FromBody] Render3DRequest request)
+    {
+        if (!_seriesStore.TryGetValue(request.SeriesId, out var series))
+            return NotFound("Series not found");
+
+        try
+        {
+            var engine = _renderEngine.Value;
+            var volume = series.AssembleVolume();
+
+            engine.UploadVolume(volume);
+
+            var tf = request.TransferFunction switch
+            {
+                "bone" => TransferFunction.CreateBone(),
+                "soft_tissue" => TransferFunction.CreateSoftTissue(),
+                _ => new TransferFunction()
+            };
+            engine.UploadTransferFunction(tf);
+
+            var camera = new Camera(distance: 2.5f);
+            if (request.Yaw != 0 || request.Pitch != 0)
+            {
+                camera.ApplyInput("rotate", request.Yaw / 0.3f, request.Pitch / 0.3f, 0, 512, 512);
+            }
+
+            var pixels = engine.RenderFrame(camera, request.Width, request.Height);
+
+            // Encode as RGB PNG
+            var pngBytes = EncodeRgbPng(pixels, request.Width, request.Height);
+
+            return File(pngBytes, "image/png");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Render error: {ex.Message}");
+        }
+    }
+
+    private static byte[] EncodeRgbPng(byte[] rgb, int width, int height)
+    {
+        using var ms = new MemoryStream();
+
+        // PNG signature
+        ms.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        // IHDR chunk (RGB)
+        WriteChunk(ms, "IHDR", [
+            ..ToBigEndian(width),
+            ..ToBigEndian(height),
+            8,  // bit depth
+            2,  // color type: RGB
+            0, 0, 0
+        ]);
+
+        // IDAT chunk
+        var rawRowSize = 1 + width * 3;
+        var rawData = new byte[rawRowSize * height];
+        for (int y = 0; y < height; y++)
+        {
+            rawData[y * rawRowSize] = 0; // no filter
+            System.Buffer.BlockCopy(rgb, y * width * 3, rawData, y * rawRowSize + 1, width * 3);
+        }
+
+        using var compressed = new MemoryStream();
+        using (var zlib = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionLevel.Fastest))
+        {
+            zlib.Write(rawData);
+        }
+        WriteChunk(ms, "IDAT", compressed.ToArray());
+        WriteChunk(ms, "IEND", []);
+
+        return ms.ToArray();
     }
 
     private static byte[] ConvertToGrayscalePng(
@@ -62,7 +170,6 @@ public class DicomController : ControllerBase
     {
         var voxelCount = width * height;
 
-        // Convert raw bytes to double values (apply rescale)
         var values = new double[voxelCount];
         for (int i = 0; i < voxelCount; i++)
         {
@@ -73,7 +180,7 @@ public class DicomController : ControllerBase
                     ? BitConverter.ToInt16(pixelData, i * 2)
                     : BitConverter.ToUInt16(pixelData, i * 2);
             }
-            else // 8-bit
+            else
             {
                 raw = isSigned
                     ? (sbyte)pixelData[i]
@@ -82,12 +189,10 @@ public class DicomController : ControllerBase
             values[i] = raw * slope + intercept;
         }
 
-        // Apply window/level to map to 0-255
         double center = windowCenter;
         double wWidth = windowWidth;
         if (wWidth <= 0)
         {
-            // Auto-window: use full range
             var min = values.Min();
             var max = values.Max();
             center = (min + max) / 2.0;
@@ -104,36 +209,26 @@ public class DicomController : ControllerBase
             grayscale[i] = (byte)Math.Clamp(normalized * 255.0, 0, 255);
         }
 
-        // Encode as grayscale PNG
         return EncodeGrayscalePng(grayscale, width, height);
     }
 
     private static byte[] EncodeGrayscalePng(byte[] grayscale, int width, int height)
     {
-        // Minimal PNG encoder for 8-bit grayscale
         using var ms = new MemoryStream();
-
-        // PNG signature
         ms.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
-        // IHDR chunk
         WriteChunk(ms, "IHDR", [
             ..ToBigEndian(width),
             ..ToBigEndian(height),
-            8,  // bit depth
-            0,  // color type: grayscale
-            0,  // compression
-            0,  // filter
-            0   // interlace
+            8, 0, 0, 0, 0
         ]);
 
-        // IDAT chunk (raw image data with zlib)
-        var rawRowSize = 1 + width; // filter byte + row data
+        var rawRowSize = 1 + width;
         var rawData = new byte[rawRowSize * height];
         for (int y = 0; y < height; y++)
         {
-            rawData[y * rawRowSize] = 0; // no filter
-            Buffer.BlockCopy(grayscale, y * width, rawData, y * rawRowSize + 1, width);
+            rawData[y * rawRowSize] = 0;
+            System.Buffer.BlockCopy(grayscale, y * width, rawData, y * rawRowSize + 1, width);
         }
 
         using var compressed = new MemoryStream();
@@ -142,8 +237,6 @@ public class DicomController : ControllerBase
             zlib.Write(rawData);
         }
         WriteChunk(ms, "IDAT", compressed.ToArray());
-
-        // IEND chunk
         WriteChunk(ms, "IEND", []);
 
         return ms.ToArray();
@@ -157,10 +250,9 @@ public class DicomController : ControllerBase
         stream.Write(typeBytes);
         stream.Write(data);
 
-        // CRC32 over type + data
         var crcData = new byte[typeBytes.Length + data.Length];
-        Buffer.BlockCopy(typeBytes, 0, crcData, 0, typeBytes.Length);
-        Buffer.BlockCopy(data, 0, crcData, typeBytes.Length, data.Length);
+        System.Buffer.BlockCopy(typeBytes, 0, crcData, 0, typeBytes.Length);
+        System.Buffer.BlockCopy(data, 0, crcData, typeBytes.Length, data.Length);
         var crc = Crc32(crcData);
         stream.Write(ToBigEndian((int)crc));
     }
@@ -186,4 +278,14 @@ public class DicomController : ControllerBase
         }
         return crc ^ 0xFFFFFFFF;
     }
+}
+
+public class Render3DRequest
+{
+    public string SeriesId { get; set; } = string.Empty;
+    public int Width { get; set; } = 512;
+    public int Height { get; set; } = 512;
+    public float Yaw { get; set; }
+    public float Pitch { get; set; }
+    public string TransferFunction { get; set; } = "default";
 }
