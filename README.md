@@ -33,7 +33,7 @@ Browser (React + MUI)
               └── Data Layer (SQLite + File System)
 ```
 
-3D rendering runs on the backend using OpenGL Ray Casting. The frontend sends camera parameters via WebSocket, the backend renders frames and pushes JPEG images back at ~30fps.
+3D rendering runs on the backend using OpenGL Ray Casting. The frontend sends raw input events (mouse/pointer) via WebSocket, the backend owns camera state, renders frames and pushes JPEG images back at ~30fps.
 
 ## Project Structure
 
@@ -83,6 +83,51 @@ npm run dev
 ```
 
 The dev server starts at `http://localhost:5173`.
+
+## Build & Deploy
+
+### One-command build (frontend + backend → publish/)
+
+```bash
+./build.sh
+```
+
+This builds the frontend (`npm run build`), copies `dist/` into `Backend/YdcViewer.Api/wwwroot/`, then publishes the backend to `publish/`.
+
+### Run the published app
+
+```bash
+cd publish
+dotnet YdcViewer.Api.dll
+# Open http://localhost:5000
+```
+
+### CI/CD
+
+GitHub Actions runs on every push/PR to `main`:
+- Builds frontend and backend on Linux, Windows, macOS
+- Runs backend unit tests (`dotnet test`)
+- Uploads `publish/` as build artifact
+
+### Development mode
+
+```bash
+# Terminal 1: backend
+cd Backend && dotnet run --project YdcViewer.Api
+
+# Terminal 2: frontend (hot reload)
+cd Frontend && npm run dev
+```
+
+## Testing
+
+```bash
+# Backend unit tests
+dotnet test
+
+# Frontend E2E tests (requires Playwright)
+cd Frontend && npx playwright install && npm run test:e2e
+```
 
 ## Features
 
