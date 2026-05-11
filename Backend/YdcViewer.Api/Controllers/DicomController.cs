@@ -19,61 +19,76 @@ public class DicomController : ControllerBase
     });
 
     [HttpPost("upload")]
-    public async Task<IActionResult> Upload(IFormFile file)
+    public async Task<IActionResult> Upload(List<IFormFile> files)
     {
-        if (file == null || file.Length == 0)
+        if (files == null || files.Count == 0)
             return BadRequest("No file uploaded");
 
-        var tempPath = Path.GetTempFileName();
-        try
+        DicomSeries? series = null;
+        string? seriesId = null;
+        DicomFileResult? firstResult = null;
+
+        foreach (var file in files)
         {
-            // Write uploaded file to disk and close stream before parsing
-            await using (var stream = System.IO.File.Create(tempPath))
+            if (file == null || file.Length == 0) continue;
+
+            var tempPath = Path.GetTempFileName();
+            try
             {
-                await file.CopyToAsync(stream);
+                await using (var stream = System.IO.File.Create(tempPath))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                var result = await _parser.ParseFileAsync(tempPath);
+                var metadata = result.Metadata;
+
+                if (seriesId == null)
+                {
+                    seriesId = metadata.SeriesInstanceUid;
+                    if (string.IsNullOrEmpty(seriesId))
+                        seriesId = Guid.NewGuid().ToString();
+                }
+
+                series = _seriesStore.GetOrAdd(seriesId, _ => new DicomSeries());
+                series.AddSlice(result);
+
+                firstResult ??= result;
             }
-
-            var result = await _parser.ParseFileAsync(tempPath);
-            var metadata = result.Metadata;
-
-            // Store in series
-            var seriesId = metadata.SeriesInstanceUid;
-            if (string.IsNullOrEmpty(seriesId))
-                seriesId = Guid.NewGuid().ToString();
-
-            var series = _seriesStore.GetOrAdd(seriesId, _ => new DicomSeries());
-            series.AddSlice(result);
-
-            // Convert pixel data to displayable grayscale image
-            var imageBytes = ConvertToGrayscalePng(
-                result.PixelData,
-                metadata.Width,
-                metadata.Height,
-                metadata.BitsAllocated,
-                metadata.IsSigned,
-                metadata.RescaleSlope,
-                metadata.RescaleIntercept,
-                metadata.WindowCenter,
-                metadata.WindowWidth);
-
-            return Ok(new
+            finally
             {
-                seriesId,
-                metadata.PatientName,
-                metadata.Modality,
-                metadata.Width,
-                metadata.Height,
-                metadata.BitsAllocated,
-                metadata.WindowCenter,
-                metadata.WindowWidth,
-                sliceCount = series.Slices.Count,
-                imageBase64 = Convert.ToBase64String(imageBytes)
-            });
+                System.IO.File.Delete(tempPath);
+            }
         }
-        finally
+
+        if (series == null || firstResult == null)
+            return BadRequest("No valid DICOM files found");
+
+        var firstMeta = firstResult.Metadata;
+        var imageBytes = ConvertToGrayscalePng(
+            firstResult.PixelData,
+            firstMeta.Width,
+            firstMeta.Height,
+            firstMeta.BitsAllocated,
+            firstMeta.IsSigned,
+            firstMeta.RescaleSlope,
+            firstMeta.RescaleIntercept,
+            firstMeta.WindowCenter,
+            firstMeta.WindowWidth);
+
+        return Ok(new
         {
-            System.IO.File.Delete(tempPath);
-        }
+            seriesId,
+            firstMeta.PatientName,
+            firstMeta.Modality,
+            firstMeta.Width,
+            firstMeta.Height,
+            firstMeta.BitsAllocated,
+            firstMeta.WindowCenter,
+            firstMeta.WindowWidth,
+            sliceCount = series.Slices.Count,
+            imageBase64 = Convert.ToBase64String(imageBytes)
+        });
     }
 
     [HttpGet("series")]

@@ -48,8 +48,8 @@ function App() {
   const [sliceLoading, setSliceLoading] = useState(false);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setLoading(true);
     setError(null);
@@ -57,7 +57,9 @@ function App() {
     setImage3D(null);
 
     const formData = new FormData();
-    formData.append('file', file);
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
 
     try {
       const res = await fetch('/api/dicom/upload', {
@@ -161,7 +163,7 @@ function App() {
                 disabled={loading}
               >
                 {loading ? 'Processing...' : 'Upload'}
-                <input type="file" hidden accept=".dcm,.dicom,*" onChange={handleUpload} />
+                <input type="file" hidden accept=".dcm,.dicom,*" multiple onChange={handleUpload} />
               </Button>
 
               {result && (
