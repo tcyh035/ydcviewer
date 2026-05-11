@@ -5,18 +5,27 @@ import {
   AppBar,
   Toolbar,
   Typography,
-  Container,
   Box,
   Button,
   Paper,
   CircularProgress,
   Alert,
   Slider,
+  ToggleButton,
+  ToggleButtonGroup,
+  Divider,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import ThreeDRotationIcon from '@mui/icons-material/ThreeDRotation';
+import PanToolIcon from '@mui/icons-material/PanTool';
+import ZoomInIcon from '@mui/icons-material/ZoomIn';
+import TuneIcon from '@mui/icons-material/Tune';
+import StraightenIcon from '@mui/icons-material/Straighten';
 import theme from './theme/theme';
 import Dicom2DViewer from './components/viewer/Dicom2DViewer';
+
+type ToolMode = 'pan' | 'rotate' | 'zoom' | 'windowing' | 'annotate';
+type ViewMode = '2d' | '3d';
 
 interface DicomResult {
   seriesId: string;
@@ -31,6 +40,23 @@ interface DicomResult {
   imageBase64: string;
 }
 
+const CURSOR_MAP: Record<ToolMode, string> = {
+  pan: 'grab',
+  rotate: 'crosshair',
+  zoom: 'zoom-in',
+  windowing: 'col-resize',
+  annotate: 'crosshair',
+};
+
+const WL_PRESETS = [
+  { name: 'Default', wc: 0, ww: 0 },
+  { name: 'CT Bone', wc: 400, ww: 1800 },
+  { name: 'CT Soft', wc: 40, ww: 400 },
+  { name: 'CT Lung', wc: -600, ww: 1500 },
+  { name: 'CT Brain', wc: 40, ww: 80 },
+  { name: 'CT Abdomen', wc: 60, ww: 400 },
+];
+
 function App() {
   const [loading, setLoading] = useState(false);
   const [rendering3D, setRendering3D] = useState(false);
@@ -38,7 +64,8 @@ function App() {
   const [image3D, setImage3D] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [transferFn, setTransferFn] = useState('default');
-  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+  const [viewMode, setViewMode] = useState<ViewMode>('2d');
+  const [tool, setTool] = useState<ToolMode>('pan');
 
   // 2D viewer state
   const [sliceIndex, setSliceIndex] = useState(0);
@@ -62,15 +89,8 @@ function App() {
     }
 
     try {
-      const res = await fetch('/api/dicom/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!res.ok) {
-        throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
-      }
-
+      const res = await fetch('/api/dicom/upload', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
       const data = await res.json();
       setResult(data);
       setSliceIndex(0);
@@ -93,9 +113,7 @@ function App() {
       const oldSrc = currentImageSrc;
       setCurrentImageSrc(URL.createObjectURL(blob));
       if (oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
-    } catch {
-      // ignore
-    } finally {
+    } catch { /* ignore */ } finally {
       setSliceLoading(false);
     }
   }, [result?.seriesId, currentImageSrc]);
@@ -108,31 +126,22 @@ function App() {
 
   const handleRender3D = async () => {
     if (!result?.seriesId) return;
-
     setRendering3D(true);
     setError(null);
-
     try {
       const res = await fetch('/api/dicom/render3d', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          seriesId: result.seriesId,
-          width: 512,
-          height: 512,
-          yaw: 30,
-          pitch: 20,
-          transferFunction: transferFn,
+          seriesId: result.seriesId, width: 512, height: 512,
+          yaw: 30, pitch: 20, transferFunction: transferFn,
         }),
       });
-
-      if (!res.ok) {
-        throw new Error(`3D render failed: ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`3D render failed: ${res.status}`);
       const blob = await res.blob();
       setImage3D(URL.createObjectURL(blob));
       setViewMode('3d');
+      setTool('rotate');
     } catch (err) {
       setError(err instanceof Error ? err.message : '3D render failed');
     } finally {
@@ -140,162 +149,257 @@ function App() {
     }
   };
 
+  const activePreset = WL_PRESETS.find(p => p.wc === windowCenter && p.ww === windowWidth);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-        <AppBar position="static">
-          <Toolbar>
-            <Typography variant="h6">YdcViewer</Typography>
+      <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Top Bar */}
+        <AppBar position="static" sx={{ bgcolor: '#1a1a2e' }}>
+          <Toolbar variant="dense" sx={{ gap: 2 }}>
+            <Typography variant="h6" sx={{ flexGrow: 0 }}>YdcViewer</Typography>
+            <Button
+              variant="contained"
+              size="small"
+              component="label"
+              startIcon={loading ? <CircularProgress size={16} /> : <CloudUploadIcon />}
+              disabled={loading}
+            >
+              {loading ? 'Uploading...' : 'Upload DICOM'}
+              <input type="file" hidden accept=".dcm,.dicom,*" multiple onChange={handleUpload} />
+            </Button>
+            {result && (
+              <>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={rendering3D ? <CircularProgress size={16} /> : <ThreeDRotationIcon />}
+                  onClick={handleRender3D}
+                  disabled={rendering3D}
+                >
+                  3D Render
+                </Button>
+                <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(255,255,255,0.2)' }} />
+                <Typography variant="body2" color="text.secondary">
+                  {result.patientName || 'N/A'} | {result.modality} | {result.sliceCount} slices
+                </Typography>
+              </>
+            )}
           </Toolbar>
         </AppBar>
 
-        <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
-          {/* Main viewer area */}
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {/* Toolbar */}
-            <Paper sx={{ p: 1.5, display: 'flex', gap: 2, alignItems: 'center', borderRadius: 0 }}>
-              <Button
-                variant="contained"
-                component="label"
-                size="small"
-                startIcon={loading ? <CircularProgress size={16} /> : <CloudUploadIcon />}
-                disabled={loading}
-              >
-                {loading ? 'Processing...' : 'Upload'}
-                <input type="file" hidden accept=".dcm,.dicom,*" multiple onChange={handleUpload} />
-              </Button>
-
-              {result && (
-                <>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={rendering3D ? <CircularProgress size={16} /> : <ThreeDRotationIcon />}
-                    onClick={handleRender3D}
-                    disabled={rendering3D}
-                  >
-                    3D
-                  </Button>
-                  <Box sx={{ flex: 1 }} />
-                  <Typography variant="body2" color="text.secondary">
-                    {viewMode === '2d'
-                      ? `Slice ${sliceIndex + 1} / ${result.sliceCount}`
-                      : '3D View'}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {result.patientName || 'N/A'} | {result.modality}
-                  </Typography>
-                </>
+        {/* Toolbar */}
+        {result && (
+          <Paper sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 0.5, borderRadius: 0, borderBottom: 1, borderColor: 'divider' }}>
+            <ToggleButtonGroup
+              value={tool}
+              exclusive
+              onChange={(_, v) => v && setTool(v)}
+              size="small"
+            >
+              <ToggleButton value="pan" title="Pan (drag to move image)">
+                <PanToolIcon fontSize="small" />
+              </ToggleButton>
+              {viewMode === '3d' && (
+                <ToggleButton value="rotate" title="Rotate (drag to rotate 3D view)">
+                  <ThreeDRotationIcon fontSize="small" />
+                </ToggleButton>
               )}
-            </Paper>
+              <ToggleButton value="zoom" title="Zoom (drag or scroll to zoom)">
+                <ZoomInIcon fontSize="small" />
+              </ToggleButton>
+              <ToggleButton value="windowing" title="Window/Level (drag to adjust brightness)">
+                <TuneIcon fontSize="small" />
+              </ToggleButton>
+              <ToggleButton value="annotate" title="Annotate (click and drag to measure)">
+                <StraightenIcon fontSize="small" />
+              </ToggleButton>
+            </ToggleButtonGroup>
 
-            {/* Image area */}
-            <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-              {!result ? (
-                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography color="text.secondary">Upload a DICOM file to start</Typography>
-                </Box>
-              ) : viewMode === '2d' ? (
-                <Dicom2DViewer src={currentImageSrc} alt="DICOM slice" />
-              ) : image3D ? (
-                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#000' }}>
-                  <img src={image3D} alt="3D" style={{ maxWidth: '100%', maxHeight: '100%' }} />
-                </Box>
-              ) : null}
+            <Divider orientation="vertical" flexItem />
 
-              {sliceLoading && (
-                <CircularProgress
-                  size={24}
-                  sx={{ position: 'absolute', top: 8, right: 8, color: 'rgba(255,255,255,0.5)' }}
-                />
-              )}
-            </Box>
+            <ToggleButtonGroup
+              value={viewMode}
+              exclusive
+              onChange={(_, v) => { if (v) { setViewMode(v); setTool(v === '3d' ? 'rotate' : 'pan'); } }}
+              size="small"
+            >
+              <ToggleButton value="2d">2D</ToggleButton>
+              <ToggleButton value="3d" disabled={!image3D}>3D</ToggleButton>
+            </ToggleButtonGroup>
 
-            {/* Slice slider */}
-            {result && result.sliceCount > 1 && viewMode === '2d' && (
-              <Paper sx={{ p: 1, borderRadius: 0 }}>
-                <Box sx={{ px: 2 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Slice
-                  </Typography>
-                  <Slider
-                    value={sliceIndex}
-                    min={0}
-                    max={result.sliceCount - 1}
-                    step={1}
-                    onChange={(_, v) => setSliceIndex(v as number)}
-                    size="small"
-                    valueLabelDisplay="auto"
-                  />
-                </Box>
-              </Paper>
+            <Divider orientation="vertical" flexItem />
+
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              {tool === 'pan' && 'Drag to pan'}
+              {tool === 'rotate' && 'Drag to rotate 3D'}
+              {tool === 'zoom' && 'Drag/scroll to zoom'}
+              {tool === 'windowing' && 'Drag: horizontal=width, vertical=center'}
+              {tool === 'annotate' && 'Click and drag to measure'}
+            </Typography>
+          </Paper>
+        )}
+
+        {/* Main Content */}
+        <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          {/* Viewport */}
+          <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+            {!result ? (
+              <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="h5" color="text.secondary">Upload a DICOM file to start</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Supports .dcm files. Select multiple files to load a series.
+                </Typography>
+              </Box>
+            ) : viewMode === '2d' ? (
+              <Dicom2DViewer
+                src={currentImageSrc}
+                cursor={CURSOR_MAP[tool]}
+                tool={tool}
+                onWindowingChange={(dw, dc) => {
+                  setWindowWidth(w => Math.max(1, Math.round(w + dw)));
+                  setWindowCenter(c => Math.round(c + dc));
+                }}
+              />
+            ) : image3D ? (
+              <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#000' }}>
+                <img src={image3D} alt="3D" style={{ maxWidth: '100%', maxHeight: '100%' }} />
+              </Box>
+            ) : null}
+
+            {sliceLoading && (
+              <CircularProgress size={20} sx={{ position: 'absolute', top: 8, right: 8, color: 'rgba(255,255,255,0.4)' }} />
             )}
           </Box>
 
-          {/* Right panel: Window/Level controls */}
+          {/* Right Panel */}
           {result && (
-            <Paper sx={{ width: 220, borderRadius: 0, p: 2, overflow: 'auto' }}>
-              <Typography variant="subtitle2" gutterBottom>Window / Level</Typography>
-
-              <Typography variant="caption" color="text.secondary">Center</Typography>
-              <Slider
-                value={windowCenter}
-                min={-1024}
-                max={3071}
-                step={1}
-                onChange={(_, v) => setWindowCenter(v as number)}
-                size="small"
-              />
-
-              <Typography variant="caption" color="text.secondary">Width</Typography>
-              <Slider
-                value={windowWidth}
-                min={1}
-                max={4096}
-                step={1}
-                onChange={(_, v) => setWindowWidth(v as number)}
-                size="small"
-              />
-
-              <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>Presets</Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                {[
-                  { name: 'Default', wc: result.windowCenter, ww: result.windowWidth },
-                  { name: 'CT Bone', wc: 400, ww: 1800 },
-                  { name: 'CT Soft', wc: 40, ww: 400 },
-                  { name: 'CT Lung', wc: -600, ww: 1500 },
-                  { name: 'CT Brain', wc: 40, ww: 80 },
-                  { name: 'CT Abdomen', wc: 60, ww: 400 },
-                ].map(p => (
-                  <Button
-                    key={p.name}
-                    size="small"
-                    variant={windowCenter === p.wc && windowWidth === p.ww ? 'contained' : 'text'}
-                    onClick={() => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
-                    sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
-                  >
-                    {p.name}
-                  </Button>
-                ))}
+            <Paper sx={{ width: 240, borderRadius: 0, borderLeft: 1, borderColor: 'divider', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {/* Patient Info */}
+              <Box sx={{ p: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>Patient Info</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', fontSize: 13 }}>
+                  <Typography variant="body2" color="text.secondary">Name:</Typography>
+                  <Typography variant="body2">{result.patientName || 'N/A'}</Typography>
+                  <Typography variant="body2" color="text.secondary">Modality:</Typography>
+                  <Typography variant="body2">{result.modality}</Typography>
+                  <Typography variant="body2" color="text.secondary">Size:</Typography>
+                  <Typography variant="body2">{result.width} x {result.height}</Typography>
+                  <Typography variant="body2" color="text.secondary">Slices:</Typography>
+                  <Typography variant="body2">{result.sliceCount}</Typography>
+                  <Typography variant="body2" color="text.secondary">Bits:</Typography>
+                  <Typography variant="body2">{result.bitsAllocated}</Typography>
+                </Box>
               </Box>
 
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Mouse Controls
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 0.5 }}>
-                  Drag: Pan<br />
-                  Scroll: Zoom<br />
-                  Double-click: Reset
+              <Divider />
+
+              {/* Window/Level */}
+              <Box sx={{ p: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>Window / Level</Typography>
+                <Typography variant="caption" color="text.secondary">Center</Typography>
+                <Slider
+                  value={windowCenter}
+                  min={-1024}
+                  max={3071}
+                  step={1}
+                  onChange={(_, v) => setWindowCenter(v as number)}
+                  size="small"
+                />
+                <Typography variant="caption" color="text.secondary">Width</Typography>
+                <Slider
+                  value={windowWidth}
+                  min={1}
+                  max={4096}
+                  step={1}
+                  onChange={(_, v) => setWindowWidth(v as number)}
+                  size="small"
+                />
+              </Box>
+
+              <Divider />
+
+              {/* Presets */}
+              <Box sx={{ p: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>Presets</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  {WL_PRESETS.map(p => (
+                    <Button
+                      key={p.name}
+                      size="small"
+                      variant={activePreset?.name === p.name ? 'contained' : 'text'}
+                      onClick={() => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
+                      sx={{ justifyContent: 'flex-start', textTransform: 'none', fontSize: 13 }}
+                    >
+                      {p.name}
+                    </Button>
+                  ))}
+                </Box>
+              </Box>
+
+              <Divider />
+
+              {/* Transfer Function (3D) */}
+              {viewMode === '3d' && (
+                <>
+                  <Box sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>Transfer Function</Typography>
+                    <ToggleButtonGroup
+                      value={transferFn}
+                      exclusive
+                      onChange={(_, v) => v && setTransferFn(v)}
+                      size="small"
+                      orientation="vertical"
+                      fullWidth
+                    >
+                      <ToggleButton value="default" sx={{ textTransform: 'none' }}>Default</ToggleButton>
+                      <ToggleButton value="bone" sx={{ textTransform: 'none' }}>Bone</ToggleButton>
+                      <ToggleButton value="soft_tissue" sx={{ textTransform: 'none' }}>Soft Tissue</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
+                  <Divider />
+                </>
+              )}
+
+              {/* Annotations (placeholder) */}
+              <Box sx={{ p: 2, flex: 1 }}>
+                <Typography variant="subtitle2" gutterBottom>Annotations</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  No annotations yet
                 </Typography>
               </Box>
             </Paper>
           )}
         </Box>
 
+        {/* Bottom Bar */}
+        {result && result.sliceCount > 1 && viewMode === '2d' && (
+          <Paper sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 2, py: 0.5, borderRadius: 0, borderTop: 1, borderColor: 'divider' }}>
+            <Typography variant="caption" color="text.secondary">Slice:</Typography>
+            <Slider
+              value={sliceIndex}
+              min={0}
+              max={result.sliceCount - 1}
+              step={1}
+              onChange={(_, v) => setSliceIndex(v as number)}
+              size="small"
+              sx={{ flex: 1 }}
+              valueLabelDisplay="auto"
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 60, textAlign: 'right' }}>
+              {sliceIndex + 1} / {result.sliceCount}
+            </Typography>
+          </Paper>
+        )}
+
+        {/* Error Toast */}
         {error && (
-          <Alert severity="error" sx={{ position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}>
+          <Alert
+            severity="error"
+            onClose={() => setError(null)}
+            sx={{ position: 'fixed', bottom: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 9999 }}
+          >
             {error}
           </Alert>
         )}

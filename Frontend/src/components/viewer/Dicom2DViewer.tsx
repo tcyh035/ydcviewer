@@ -1,13 +1,23 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Box } from '@mui/material';
 
+type ToolMode = 'pan' | 'rotate' | 'zoom' | 'windowing' | 'annotate';
+
 interface Dicom2DViewerProps {
   src: string;
   alt?: string;
+  cursor?: string;
+  tool?: ToolMode;
+  onWindowingChange?: (deltaWidth: number, deltaCenter: number) => void;
 }
 
-export default function Dicom2DViewer({ src, alt }: Dicom2DViewerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+export default function Dicom2DViewer({
+  src,
+  alt,
+  cursor = 'grab',
+  tool = 'pan',
+  onWindowingChange,
+}: Dicom2DViewerProps) {
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -21,21 +31,34 @@ export default function Dicom2DViewer({ src, alt }: Dicom2DViewerProps) {
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 0) {
-      setDragging(true);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setOffsetStart({ ...offset });
-    }
+    if (e.button !== 0) return;
+    setDragging(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setOffsetStart({ ...offset });
   }, [offset]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (dragging) {
-      setOffset({
-        x: offsetStart.x + (e.clientX - dragStart.x),
-        y: offsetStart.y + (e.clientY - dragStart.y),
-      });
+    if (!dragging) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+
+    switch (tool) {
+      case 'pan':
+        setOffset({ x: offsetStart.x + dx, y: offsetStart.y + dy });
+        break;
+      case 'zoom': {
+        const zoomFactor = 1 + dy * -0.005;
+        setScale(s => Math.max(0.1, Math.min(20, s * zoomFactor)));
+        break;
+      }
+      case 'windowing':
+        onWindowingChange?.(dx * 2, dy * -2);
+        break;
+      case 'annotate':
+        // TODO: draw annotation line
+        break;
     }
-  }, [dragging, dragStart, offsetStart]);
+  }, [dragging, dragStart, offsetStart, tool, onWindowingChange]);
 
   const handleMouseUp = useCallback(() => {
     setDragging(false);
@@ -53,17 +76,17 @@ export default function Dicom2DViewer({ src, alt }: Dicom2DViewerProps) {
 
   return (
     <Box
-      ref={containerRef}
       sx={{
         width: '100%',
         height: '100%',
         overflow: 'hidden',
         bgcolor: '#000',
-        cursor: dragging ? 'grabbing' : 'grab',
+        cursor: dragging ? (tool === 'zoom' ? 'zoom-in' : tool === 'windowing' ? 'col-resize' : cursor) : cursor,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         position: 'relative',
+        userSelect: 'none',
       }}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
@@ -81,7 +104,6 @@ export default function Dicom2DViewer({ src, alt }: Dicom2DViewerProps) {
           maxWidth: '100%',
           maxHeight: '100%',
           imageRendering: 'pixelated',
-          userSelect: 'none',
         }}
       />
       <Box
@@ -89,7 +111,7 @@ export default function Dicom2DViewer({ src, alt }: Dicom2DViewerProps) {
           position: 'absolute',
           bottom: 8,
           right: 8,
-          color: 'rgba(255,255,255,0.5)',
+          color: 'rgba(255,255,255,0.4)',
           fontSize: 12,
           pointerEvents: 'none',
         }}
