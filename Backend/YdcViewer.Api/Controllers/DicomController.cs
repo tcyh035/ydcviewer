@@ -27,8 +27,11 @@ public class DicomController : ControllerBase
         var tempPath = Path.GetTempFileName();
         try
         {
-            await using var stream = System.IO.File.Create(tempPath);
-            await file.CopyToAsync(stream);
+            // Write uploaded file to disk and close stream before parsing
+            await using (var stream = System.IO.File.Create(tempPath))
+            {
+                await file.CopyToAsync(stream);
+            }
 
             var result = await _parser.ParseFileAsync(tempPath);
             var metadata = result.Metadata;
