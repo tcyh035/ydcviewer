@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ThemeProvider,
   CssBaseline,
@@ -11,12 +11,12 @@ import {
   Paper,
   CircularProgress,
   Alert,
-  ToggleButton,
-  ToggleButtonGroup,
+  Slider,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import ThreeDRotationIcon from '@mui/icons-material/ThreeDRotation';
 import theme from './theme/theme';
+import Dicom2DViewer from './components/viewer/Dicom2DViewer';
 
 interface DicomResult {
   seriesId: string;
@@ -39,6 +39,13 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [transferFn, setTransferFn] = useState('default');
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+
+  // 2D viewer state
+  const [sliceIndex, setSliceIndex] = useState(0);
+  const [windowCenter, setWindowCenter] = useState(0);
+  const [windowWidth, setWindowWidth] = useState(0);
+  const [currentImageSrc, setCurrentImageSrc] = useState('');
+  const [sliceLoading, setSliceLoading] = useState(false);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,12 +71,38 @@ function App() {
 
       const data = await res.json();
       setResult(data);
+      setSliceIndex(0);
+      setWindowCenter(data.windowCenter);
+      setWindowWidth(data.windowWidth);
+      setCurrentImageSrc(`data:image/png;base64,${data.imageBase64}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchSlice = useCallback(async (index: number, wc: number, ww: number) => {
+    if (!result?.seriesId) return;
+    setSliceLoading(true);
+    try {
+      const url = `/api/dicom/series/${result.seriesId}/slice/${index}?windowCenter=${wc}&windowWidth=${ww}`;
+      const blob = await (await fetch(url)).blob();
+      const oldSrc = currentImageSrc;
+      setCurrentImageSrc(URL.createObjectURL(blob));
+      if (oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+    } catch {
+      // ignore
+    } finally {
+      setSliceLoading(false);
+    }
+  }, [result?.seriesId, currentImageSrc]);
+
+  useEffect(() => {
+    if (result?.seriesId && result.sliceCount > 0) {
+      fetchSlice(sliceIndex, windowCenter, windowWidth);
+    }
+  }, [sliceIndex, windowCenter, windowWidth]);
 
   const handleRender3D = async () => {
     if (!result?.seriesId) return;
@@ -111,116 +144,159 @@ function App() {
       <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
         <AppBar position="static">
           <Toolbar>
-            <Typography variant="h6">YdcViewer - DICOM Viewer</Typography>
+            <Typography variant="h6">YdcViewer</Typography>
           </Toolbar>
         </AppBar>
 
-        <Container maxWidth="md" sx={{ py: 4 }}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Upload DICOM File
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
+          {/* Main viewer area */}
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Toolbar */}
+            <Paper sx={{ p: 1.5, display: 'flex', gap: 2, alignItems: 'center', borderRadius: 0 }}>
               <Button
                 variant="contained"
                 component="label"
-                startIcon={loading ? <CircularProgress size={20} /> : <CloudUploadIcon />}
+                size="small"
+                startIcon={loading ? <CircularProgress size={16} /> : <CloudUploadIcon />}
                 disabled={loading}
               >
-                {loading ? 'Processing...' : 'Select DICOM File'}
-                <input
-                  type="file"
-                  hidden
-                  accept=".dcm,.dicom,*"
-                  onChange={handleUpload}
-                />
+                {loading ? 'Processing...' : 'Upload'}
+                <input type="file" hidden accept=".dcm,.dicom,*" onChange={handleUpload} />
               </Button>
 
               {result && (
-                <Button
-                  variant="outlined"
-                  startIcon={rendering3D ? <CircularProgress size={20} /> : <ThreeDRotationIcon />}
-                  onClick={handleRender3D}
-                  disabled={rendering3D}
-                >
-                  {rendering3D ? 'Rendering...' : '3D Render'}
-                </Button>
+                <>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={rendering3D ? <CircularProgress size={16} /> : <ThreeDRotationIcon />}
+                    onClick={handleRender3D}
+                    disabled={rendering3D}
+                  >
+                    3D
+                  </Button>
+                  <Box sx={{ flex: 1 }} />
+                  <Typography variant="body2" color="text.secondary">
+                    {viewMode === '2d'
+                      ? `Slice ${sliceIndex + 1} / ${result.sliceCount}`
+                      : '3D View'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {result.patientName || 'N/A'} | {result.modality}
+                  </Typography>
+                </>
               )}
+            </Paper>
 
-              {result && (
-                <ToggleButtonGroup
-                  value={viewMode}
-                  exclusive
-                  onChange={(_, v) => v && setViewMode(v)}
-                  size="small"
-                >
-                  <ToggleButton value="2d">2D</ToggleButton>
-                  <ToggleButton value="3d" disabled={!image3D}>3D</ToggleButton>
-                </ToggleButtonGroup>
+            {/* Image area */}
+            <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+              {!result ? (
+                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography color="text.secondary">Upload a DICOM file to start</Typography>
+                </Box>
+              ) : viewMode === '2d' ? (
+                <Dicom2DViewer src={currentImageSrc} alt="DICOM slice" />
+              ) : image3D ? (
+                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#000' }}>
+                  <img src={image3D} alt="3D" style={{ maxWidth: '100%', maxHeight: '100%' }} />
+                </Box>
+              ) : null}
+
+              {sliceLoading && (
+                <CircularProgress
+                  size={24}
+                  sx={{ position: 'absolute', top: 8, right: 8, color: 'rgba(255,255,255,0.5)' }}
+                />
               )}
             </Box>
 
-            {result && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Transfer Function:
-                </Typography>
-                <ToggleButtonGroup
-                  value={transferFn}
-                  exclusive
-                  onChange={(_, v) => v && setTransferFn(v)}
-                  size="small"
-                  sx={{ mt: 1 }}
-                >
-                  <ToggleButton value="default">Default</ToggleButton>
-                  <ToggleButton value="bone">Bone</ToggleButton>
-                  <ToggleButton value="soft_tissue">Soft Tissue</ToggleButton>
-                </ToggleButtonGroup>
-              </Box>
+            {/* Slice slider */}
+            {result && result.sliceCount > 1 && viewMode === '2d' && (
+              <Paper sx={{ p: 1, borderRadius: 0 }}>
+                <Box sx={{ px: 2 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Slice
+                  </Typography>
+                  <Slider
+                    value={sliceIndex}
+                    min={0}
+                    max={result.sliceCount - 1}
+                    step={1}
+                    onChange={(_, v) => setSliceIndex(v as number)}
+                    size="small"
+                    valueLabelDisplay="auto"
+                  />
+                </Box>
+              </Paper>
             )}
-          </Paper>
+          </Box>
 
-          {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
-          )}
-
+          {/* Right panel: Window/Level controls */}
           {result && (
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Result
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mb: 2 }}>
-                <Typography><strong>Patient:</strong> {result.patientName || 'N/A'}</Typography>
-                <Typography><strong>Modality:</strong> {result.modality || 'N/A'}</Typography>
-                <Typography><strong>Size:</strong> {result.width} x {result.height}</Typography>
-                <Typography><strong>Slices:</strong> {result.sliceCount}</Typography>
-                <Typography><strong>Bits:</strong> {result.bitsAllocated}</Typography>
-                <Typography><strong>W/L:</strong> {result.windowWidth} / {result.windowCenter}</Typography>
+            <Paper sx={{ width: 220, borderRadius: 0, p: 2, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>Window / Level</Typography>
+
+              <Typography variant="caption" color="text.secondary">Center</Typography>
+              <Slider
+                value={windowCenter}
+                min={-1024}
+                max={3071}
+                step={1}
+                onChange={(_, v) => setWindowCenter(v as number)}
+                size="small"
+              />
+
+              <Typography variant="caption" color="text.secondary">Width</Typography>
+              <Slider
+                value={windowWidth}
+                min={1}
+                max={4096}
+                step={1}
+                onChange={(_, v) => setWindowWidth(v as number)}
+                size="small"
+              />
+
+              <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>Presets</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                {[
+                  { name: 'Default', wc: result.windowCenter, ww: result.windowWidth },
+                  { name: 'CT Bone', wc: 400, ww: 1800 },
+                  { name: 'CT Soft', wc: 40, ww: 400 },
+                  { name: 'CT Lung', wc: -600, ww: 1500 },
+                  { name: 'CT Brain', wc: 40, ww: 80 },
+                  { name: 'CT Abdomen', wc: 60, ww: 400 },
+                ].map(p => (
+                  <Button
+                    key={p.name}
+                    size="small"
+                    variant={windowCenter === p.wc && windowWidth === p.ww ? 'contained' : 'text'}
+                    onClick={() => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+                  >
+                    {p.name}
+                  </Button>
+                ))}
               </Box>
 
-              <Typography variant="h6" gutterBottom>
-                {viewMode === '3d' ? '3D Volume Rendering' : '2D Slice'}
-              </Typography>
-              <Box sx={{ textAlign: 'center', bgcolor: '#000', p: 2, borderRadius: 1 }}>
-                {viewMode === '3d' && image3D ? (
-                  <img
-                    src={image3D}
-                    alt="3D Volume"
-                    style={{ maxWidth: '100%', maxHeight: '600px' }}
-                  />
-                ) : (
-                  <img
-                    src={`data:image/png;base64,${result.imageBase64}`}
-                    alt="DICOM"
-                    style={{ maxWidth: '100%', maxHeight: '600px', imageRendering: 'pixelated' }}
-                  />
-                )}
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Mouse Controls
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  Drag: Pan<br />
+                  Scroll: Zoom<br />
+                  Double-click: Reset
+                </Typography>
               </Box>
             </Paper>
           )}
-        </Container>
+        </Box>
+
+        {error && (
+          <Alert severity="error" sx={{ position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}>
+            {error}
+          </Alert>
+        )}
       </Box>
     </ThemeProvider>
   );
