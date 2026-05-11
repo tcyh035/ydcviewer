@@ -86,6 +86,35 @@ public class DicomController : ControllerBase
         return Ok(series);
     }
 
+    [HttpGet("series/{seriesId}/slice/{sliceIndex}")]
+    public IActionResult GetSlice(string seriesId, int sliceIndex,
+        [FromQuery] int windowCenter = 0, [FromQuery] int windowWidth = 0)
+    {
+        if (!_seriesStore.TryGetValue(seriesId, out var series))
+            return NotFound("Series not found");
+
+        if (sliceIndex < 0 || sliceIndex >= series.Slices.Count)
+            return BadRequest($"Slice index {sliceIndex} out of range [0, {series.Slices.Count - 1}]");
+
+        var slice = series.Slices[sliceIndex];
+        var metadata = slice.Metadata;
+
+        var wc = windowCenter != 0 ? windowCenter : metadata.WindowCenter;
+        var ww = windowWidth != 0 ? windowWidth : metadata.WindowWidth;
+
+        var imageBytes = ConvertToGrayscalePng(
+            slice.PixelData,
+            metadata.Width,
+            metadata.Height,
+            metadata.BitsAllocated,
+            metadata.IsSigned,
+            metadata.RescaleSlope,
+            metadata.RescaleIntercept,
+            wc, ww);
+
+        return File(imageBytes, "image/png");
+    }
+
     [HttpPost("render3d")]
     public IActionResult Render3D([FromBody] Render3DRequest request)
     {
