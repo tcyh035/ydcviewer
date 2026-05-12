@@ -23,22 +23,8 @@ import TuneIcon from '@mui/icons-material/Tune';
 import StraightenIcon from '@mui/icons-material/Straighten';
 import theme from './theme/theme';
 import Dicom2DViewer from './components/viewer/Dicom2DViewer';
-
-type ToolMode = 'pan' | 'rotate' | 'zoom' | 'windowing' | 'annotate';
-type ViewMode = '2d' | '3d';
-
-interface DicomResult {
-  seriesId: string;
-  patientName: string;
-  modality: string;
-  width: number;
-  height: number;
-  bitsAllocated: number;
-  windowCenter: number;
-  windowWidth: number;
-  sliceCount: number;
-  imageBase64: string;
-}
+import PatientInfoPanel from './components/panels/PatientInfoPanel';
+import type { ToolMode, ViewMode, DicomResult } from './types';
 
 const CURSOR_MAP: Record<ToolMode, string> = {
   pan: 'grab',
@@ -276,23 +262,7 @@ function App() {
           {/* Right Panel */}
           {result && (
             <Paper sx={{ width: 240, borderRadius: 0, borderLeft: 1, borderColor: 'divider', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-              {/* Patient Info */}
-              <Box sx={{ p: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>Patient Info</Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', fontSize: 13 }}>
-                  <Typography variant="body2" color="text.secondary">Name:</Typography>
-                  <Typography variant="body2">{result.patientName || 'N/A'}</Typography>
-                  <Typography variant="body2" color="text.secondary">Modality:</Typography>
-                  <Typography variant="body2">{result.modality}</Typography>
-                  <Typography variant="body2" color="text.secondary">Size:</Typography>
-                  <Typography variant="body2">{result.width} x {result.height}</Typography>
-                  <Typography variant="body2" color="text.secondary">Slices:</Typography>
-                  <Typography variant="body2">{result.sliceCount}</Typography>
-                  <Typography variant="body2" color="text.secondary">Bits:</Typography>
-                  <Typography variant="body2">{result.bitsAllocated}</Typography>
-                </Box>
-              </Box>
-
+              <PatientInfoPanel result={result} />
               <Divider />
 
               {/* Window/Level */}
