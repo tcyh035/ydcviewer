@@ -41,5 +41,6 @@ Backend/YdcViewer.Api/wwwroot/
 *.db-shm
 *.db-wal
 
-# Uploaded DICOM files
+# DICOM test files and uploads
+testdata/
 uploads/
