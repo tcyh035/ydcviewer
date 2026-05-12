@@ -24,7 +24,8 @@ import StraightenIcon from '@mui/icons-material/Straighten';
 import theme from './theme/theme';
 import Dicom2DViewer from './components/viewer/Dicom2DViewer';
 import PatientInfoPanel from './components/panels/PatientInfoPanel';
-import type { ToolMode, ViewMode, DicomResult } from './types';
+import PresetsPanel from './components/panels/PresetsPanel';
+import type { ToolMode, ViewMode, DicomResult, WLPreset } from './types';
 
 const CURSOR_MAP: Record<ToolMode, string> = {
   pan: 'grab',
@@ -34,7 +35,7 @@ const CURSOR_MAP: Record<ToolMode, string> = {
   annotate: 'crosshair',
 };
 
-const WL_PRESETS = [
+const WL_PRESETS: WLPreset[] = [
   { name: 'Default', wc: 0, ww: 0 },
   { name: 'CT Bone', wc: 400, ww: 1800 },
   { name: 'CT Soft', wc: 40, ww: 400 },
@@ -290,23 +291,11 @@ function App() {
 
               <Divider />
 
-              {/* Presets */}
-              <Box sx={{ p: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>Presets</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {WL_PRESETS.map(p => (
-                    <Button
-                      key={p.name}
-                      size="small"
-                      variant={activePreset?.name === p.name ? 'contained' : 'text'}
-                      onClick={() => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
-                      sx={{ justifyContent: 'flex-start', textTransform: 'none', fontSize: 13 }}
-                    >
-                      {p.name}
-                    </Button>
-                  ))}
-                </Box>
-              </Box>
+              <PresetsPanel
+                presets={WL_PRESETS}
+                activePreset={activePreset}
+                onSelect={(p) => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
+              />
 
               <Divider />
 
