@@ -24,7 +24,9 @@ import StraightenIcon from '@mui/icons-material/Straighten';
 import theme from './theme/theme';
 import Dicom2DViewer from './components/viewer/Dicom2DViewer';
 import PatientInfoPanel from './components/panels/PatientInfoPanel';
-import PresetsPanel from './components/panels/PresetsPanel';
+import WindowLevelPanel from './components/panels/WindowLevelPanel';
+import TransferFunctionPanel from './components/panels/TransferFunctionPanel';
+import AnnotationsPanel from './components/panels/AnnotationsPanel';
 import type { ToolMode, ViewMode, DicomResult, WLPreset } from './types';
 
 const CURSOR_MAP: Record<ToolMode, string> = {
@@ -267,67 +269,28 @@ function App() {
               <Divider />
 
               {/* Window/Level */}
-              <Box sx={{ p: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>Window / Level</Typography>
-                <Typography variant="caption" color="text.secondary">Center</Typography>
-                <Slider
-                  value={windowCenter}
-                  min={-1024}
-                  max={3071}
-                  step={1}
-                  onChange={(_, v) => setWindowCenter(v as number)}
-                  size="small"
-                />
-                <Typography variant="caption" color="text.secondary">Width</Typography>
-                <Slider
-                  value={windowWidth}
-                  min={1}
-                  max={4096}
-                  step={1}
-                  onChange={(_, v) => setWindowWidth(v as number)}
-                  size="small"
-                />
-              </Box>
-
-              <Divider />
-
-              <PresetsPanel
+              <WindowLevelPanel
+                windowCenter={windowCenter}
+                windowWidth={windowWidth}
                 presets={WL_PRESETS}
                 activePreset={activePreset}
-                onSelect={(p) => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
+                onWindowCenterChange={setWindowCenter}
+                onWindowWidthChange={setWindowWidth}
+                onPresetSelect={(p) => { setWindowCenter(p.wc); setWindowWidth(p.ww); }}
               />
 
               <Divider />
 
               {/* Transfer Function (3D) */}
               {viewMode === '3d' && (
-                <>
-                  <Box sx={{ p: 2 }}>
-                    <Typography variant="subtitle2" gutterBottom>Transfer Function</Typography>
-                    <ToggleButtonGroup
-                      value={transferFn}
-                      exclusive
-                      onChange={(_, v) => v && setTransferFn(v)}
-                      size="small"
-                      orientation="vertical"
-                      fullWidth
-                    >
-                      <ToggleButton value="default" sx={{ textTransform: 'none' }}>Default</ToggleButton>
-                      <ToggleButton value="bone" sx={{ textTransform: 'none' }}>Bone</ToggleButton>
-                      <ToggleButton value="soft_tissue" sx={{ textTransform: 'none' }}>Soft Tissue</ToggleButton>
-                    </ToggleButtonGroup>
-                  </Box>
-                  <Divider />
-                </>
+                <TransferFunctionPanel
+                  value={transferFn}
+                  onChange={setTransferFn}
+                />
               )}
 
-              {/* Annotations (placeholder) */}
-              <Box sx={{ p: 2, flex: 1 }}>
-                <Typography variant="subtitle2" gutterBottom>Annotations</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  No annotations yet
-                </Typography>
-              </Box>
+              {/* Annotations */}
+              <AnnotationsPanel />
             </Paper>
           )}
         </Box>
