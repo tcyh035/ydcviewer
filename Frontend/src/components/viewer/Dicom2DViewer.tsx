@@ -52,7 +52,8 @@ export default function Dicom2DViewer({
         break;
       }
       case 'windowing':
-        onWindowingChange?.(dx * 2, dy * -2);
+        // Scale: 2px drag = 1 unit change (smooth adjustment)
+        onWindowingChange?.(dx * 0.5, -dy * 0.5);
         break;
       case 'annotate':
         // TODO: draw annotation line
